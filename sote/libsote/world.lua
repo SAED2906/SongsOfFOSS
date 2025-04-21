@@ -3,12 +3,34 @@ local world = {}
 local ffi = require("ffi")
 local ffi_mem_tally = 0
 
-local function allocate_array(name, size, type)
-	ffi_mem_tally = ffi_mem_tally + size * ffi.sizeof(type) / 1024 / 1024
-	-- print("[world allocation] " .. name .. " size: " .. string.format("%.2f", size * ffi.sizeof(type) / 1024 / 1024) .. " MB")
-	return ffi.new(type .. "[?]", size)
-end
+ffi.cdef[[
+void* malloc(size_t size);
+void free(void* ptr);
+]]
 
+local function allocate_array(name, size, type)
+    local array
+    
+    -- If over 100MB allocate with proper alignment and error handling
+    if size * ffi.sizeof(type) > 100 * 1024 * 1024 then
+        local success, result = pcall(function() 
+            return ffi.gc(ffi.C.malloc(size * ffi.sizeof(type)), ffi.C.free)
+        end)
+        
+        if success then
+            array = ffi.cast(type .. "*", result)
+        else
+            error("Failed to allocate large memory block: " .. name)
+        end
+    else
+        array = ffi.new(type .. "[?]", size)
+    end
+    
+    ffi_mem_tally = ffi_mem_tally + size * ffi.sizeof(type) / 1024 / 1024
+    print("[world allocation] " .. name .. " size: " .. string.format("%.2f", size * ffi.sizeof(type) / 1024 / 1024) .. " MB")
+    
+    return array
+end
 function world:adjust_debug_channels(desired_channels)
 	if not self.debug_channels then
 		self.debug_channels = {}
